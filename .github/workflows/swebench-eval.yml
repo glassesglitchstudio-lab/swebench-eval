@@ -128,13 +128,14 @@ jobs:
       - name: Run SWE-bench Official Evaluation
         run: |
           echo "=== SWE-bench Değerlendirmesi Başlatılıyor ==="
+          mkdir -p evaluation_results
           python -m swebench.harness.run_evaluation \
             --dataset_name "${{ steps.prep.outputs.dataset }}" \
             --split "${{ github.event.inputs.split || 'test' }}" \
             --predictions_path "${{ steps.prep.outputs.pred_file }}" \
             --max_workers "${{ steps.prep.outputs.workers }}" \
             --run_id "${{ steps.prep.outputs.run_id }}" \
-            --cache_level instance
+            --report_dir evaluation_results
 
       - name: Parse Results and Notify
         if: always()
