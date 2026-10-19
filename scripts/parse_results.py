@@ -72,17 +72,18 @@ def main():
 
     print(f"[INFO] Found evaluation results in: {res_file}")
 
-    resolved = data.get("resolved", [])
-    unresolved = data.get("unresolved", [])
-    error = data.get("error", [])
+    resolved = data.get("resolved_ids") or data.get("resolved", [])
+    unresolved = data.get("unresolved_ids") or data.get("unresolved", [])
+    error = data.get("error_ids") or data.get("error", [])
 
-    total = len(resolved) + len(unresolved) + len(error)
-    if total == 0 and "total_instances" in data:
-        total = data.get("total_instances", 0)
-        res_count = data.get("resolved_instances", 0)
-        unres_count = data.get("unresolved_instances", 0)
-        err_count = data.get("error_instances", 0)
+    submitted = data.get("submitted_instances") or data.get("completed_instances")
+    if submitted:
+        total = submitted
+        res_count = len(resolved) if resolved else data.get("resolved_instances", 0)
+        unres_count = len(unresolved) if unresolved else data.get("unresolved_instances", 0)
+        err_count = len(error) if error else data.get("error_instances", 0)
     else:
+        total = len(resolved) + len(unresolved) + len(error)
         res_count = len(resolved)
         unres_count = len(unresolved)
         err_count = len(error)
