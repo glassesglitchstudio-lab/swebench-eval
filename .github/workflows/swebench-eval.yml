@@ -1,0 +1,158 @@
+name: SWE-bench Docker Evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      predictions_file:
+        description: "Değerlendirilecek predictions.jsonl dosyası"
+        required: true
+        default: "predictions/predictions_b96.jsonl"
+      dataset_name:
+        description: "SWE-bench Dataset Adı"
+        required: true
+        default: "princeton-nlp/SWE-bench_Verified"
+      split:
+        description: "Dataset Split"
+        required: true
+        default: "test"
+      max_workers:
+        description: "Paralel Docker İşçi Sayısı"
+        required: true
+        default: "2"
+      run_id:
+        description: "Run Tanımlayıcı"
+        required: true
+        default: "eval_run"
+      ntfy_topic:
+        description: "NTFY Bildirim Başlığı"
+        required: false
+        default: "gulmezcetiner-tasiyici-9f3a7c21"
+
+  repository_dispatch:
+    types: [eval_predictions]
+
+  push:
+    paths:
+      - 'predictions/**'
+
+jobs:
+  evaluate:
+    name: Run SWE-bench Official Harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Free Disk Space for Docker Images
+        run: |
+          echo "=== Disk Alanı Temizliği Başlatılıyor ==="
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -a -f || true
+          echo "=== Temizlik Sonrası Disk Alanı ==="
+          df -h
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify Docker Daemon
+        run: |
+          docker --version
+          docker info
+
+      - name: Prepare Predictions File
+        id: prep
+        run: |
+          PRED_FILE="${{ github.event.inputs.predictions_file || 'predictions/predictions_b96.jsonl' }}"
+          RUN_ID="${{ github.event.inputs.run_id || 'eval_run' }}"
+          DATASET="${{ github.event.inputs.dataset_name || 'princeton-nlp/SWE-bench_Verified' }}"
+          WORKERS="${{ github.event.inputs.max_workers || '2' }}"
+          NTFY_TOPIC="${{ github.event.inputs.ntfy_topic || 'gulmezcetiner-tasiyici-9f3a7c21' }}"
+
+          # Eğer repository_dispatch ile geldiyse payload'ı kontrol et
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "Handling repository_dispatch event..."
+            if [ -n "${{ github.event.client_payload.predictions_b64 }}" ]; then
+              echo "${{ github.event.client_payload.predictions_b64 }}" | base64 -d > predictions/dispatch_pred.jsonl
+              PRED_FILE="predictions/dispatch_pred.jsonl"
+            fi
+            if [ -n "${{ github.event.client_payload.run_id }}" ]; then
+              RUN_ID="${{ github.event.client_payload.run_id }}"
+            fi
+            if [ -n "${{ github.event.client_payload.dataset_name }}" ]; then
+              DATASET="${{ github.event.client_payload.dataset_name }}"
+            fi
+          fi
+
+          # Push event durumunda son eklenen/değişen jsonl dosyasını bul
+          if [ "${{ github.event_name }}" = "push" ]; then
+            LATEST_PRED=$(ls -t predictions/*.jsonl 2>/dev/null | head -n 1)
+            if [ -n "$LATEST_PRED" ]; then
+              PRED_FILE="$LATEST_PRED"
+              RUN_ID="push_$(date +%s)"
+            fi
+          fi
+
+          echo "Seçilen Predictions Dosyası: $PRED_FILE"
+          head -n 5 "$PRED_FILE" || true
+          COUNT=$(wc -l < "$PRED_FILE" || echo 0)
+          echo "Toplam Görev Sayısı: $COUNT"
+
+          echo "pred_file=$PRED_FILE" >> $GITHUB_OUTPUT
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "dataset=$DATASET" >> $GITHUB_OUTPUT
+          echo "workers=$WORKERS" >> $GITHUB_OUTPUT
+          echo "ntfy_topic=$NTFY_TOPIC" >> $GITHUB_OUTPUT
+
+      - name: Send Start Notification to NTFY
+        run: |
+          curl -H "Title: 🚀 SWE-bench Başlatıldı" \
+               -H "Priority: default" \
+               -H "Tags: rocket" \
+               -d "GitHub Actions Docker değerlendirmesi başladı. Run: ${{ steps.prep.outputs.run_id }} | Dosya: ${{ steps.prep.outputs.pred_file }}" \
+               https://ntfy.sh/${{ steps.prep.outputs.ntfy_topic }} || true
+
+      - name: Run SWE-bench Official Evaluation
+        run: |
+          echo "=== SWE-bench Değerlendirmesi Başlatılıyor ==="
+          python -m swebench.harness.run_evaluation \
+            --dataset_name "${{ steps.prep.outputs.dataset }}" \
+            --split "${{ github.event.inputs.split || 'test' }}" \
+            --predictions_path "${{ steps.prep.outputs.pred_file }}" \
+            --max_workers "${{ steps.prep.outputs.workers }}" \
+            --run_id "${{ steps.prep.outputs.run_id }}" \
+            --cache_level instance
+
+      - name: Parse Results and Notify
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ steps.prep.outputs.ntfy_topic }}
+          RUN_ID: ${{ steps.prep.outputs.run_id }}
+          MODEL_NAME: "gulmezcetiner-0.1-pro-27b"
+        run: |
+          python scripts/parse_results.py
+
+      - name: Upload Evaluation Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swebench-eval-${{ steps.prep.outputs.run_id }}
+          path: |
+            *.json
+            logs/
+            evaluation_results/
+            predictions/
+          retention-days: 30

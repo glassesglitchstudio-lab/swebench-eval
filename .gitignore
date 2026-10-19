@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+logs/
+evaluation_results/
+*.tar.gz
+*.zip
+.venv/
