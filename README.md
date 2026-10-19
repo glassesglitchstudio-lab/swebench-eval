@@ -30,7 +30,7 @@ Kaggle standart GPU ortamı eski C derleyicilerini ve kütüphanelerini barınd�
 2. **SWE-bench Docker Evaluation** workflow'unu seçin.
 3. **Run workflow** butonuna tıklayın:
    - `predictions_file`: `predictions/predictions_b96.jsonl` (veya istediğiniz dosya)
-   - `dataset_name`: `princeton-nlp/SWE-bench_Verified`
+   - `dataset_name`: `SWE-bench/SWE-bench_Verified`
    - `max_workers`: `2` (Runner limitine göre)
 
 ### 2. Kaggle veya Harici Betikten Otomatik Tetikleme (Repository Dispatch)
